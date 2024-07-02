@@ -87,9 +87,9 @@ const withRetryAndTimeout = async (promiseFactory, attempts, ms, timeoutMessage)
   }
   throw new Error(timeoutMessage + ` (${attempts} attempts)`);
 };
-const loadRunnerCode = async (url, siteKey) => {
+const loadRunnerCode = async (url, clientKey) => {
   try {
-    const promiseFactory = () => fetch(`${url}/challenges/v1/${siteKey}/${vmId}`).then(async r => {
+    const promiseFactory = () => fetch(`${url}/challenges/v1/${clientKey}/${vmId}`).then(async r => {
       if (!r.ok) {
         const message = await r.text();
         throw createError(message);
@@ -127,14 +127,14 @@ const initRunner = async (runnerConstructor, timestamp, api) => {
 const main = async options => {
   const {
     api,
-    siteKey
+    clientKey
   } = options;
   let runner;
   try {
     const {
       code,
       timestamp
-    } = await loadRunnerCode(api, siteKey);
+    } = await loadRunnerCode(api, clientKey);
     const normalizedTimestamp = timestamp ? Number.parseFloat(timestamp) * 1000 : Date.now();
     const runnerConstructor = parseRunnerCode(code);
     runner = await initRunner(runnerConstructor, normalizedTimestamp, api);
@@ -210,10 +210,10 @@ const dispose = () => {
 };
 const initTelemetry = async ({
   api,
-  siteKey
+  clientKey
 }) => {
   try {
-    const promiseFactory = () => fetch(`${api}/analytics/v1/${siteKey}`).then(async r => {
+    const promiseFactory = () => fetch(`${api}/analytics/v1/${clientKey}`).then(async r => {
       if (!r.ok) {
         const message = await r.text();
         throw createError(message);
@@ -221,17 +221,17 @@ const initTelemetry = async ({
       return r.text();
     });
     const code = await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "telemetry.loading.timeout");
-    new Function("sk", "api", code)(siteKey, api);
+    new Function("sk", "api", code)(clientKey, api);
   } catch {}
 };
 const initChallenges = ({
   api = "https://api.botbye.com",
-  siteKey,
+  clientKey,
   disableTelemetry = false
 }) => {
   const options = {
     api,
-    siteKey
+    clientKey
   };
   if (!disableTelemetry) {
     initTelemetry(options).catch(() => void 0);

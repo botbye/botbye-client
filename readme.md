@@ -21,7 +21,7 @@ yarn add botbye-client
 import {initChallenges} from "botbye-client";
 ```
 
-#### 2. Call `init` with SITE_KEY:
+#### 2. Call `initChallenges` with your project `client-key` (available inside your [Projects](https://app.botbye.com/admin/projects)):
 
 ```javascript
 /**
@@ -29,11 +29,11 @@ import {initChallenges} from "botbye-client";
  * @return {Promise} - Promise with runChallenge function
  */
 const runChallenge = await initChallenges({
-            siteKey: 'MY_SITE_KEY'
+            clientKey: '00000000-0000-0000-0000-000000000000' // Use your client-key
         });
 ```
 
-#### 3. To run challenge and generate CHALLENGE_TOKEN call `runChallenge`
+#### 3. To run challenge and generate BotBye token call `runChallenge`:
 
 ```javascript
 /**
@@ -42,7 +42,7 @@ const runChallenge = await initChallenges({
 const botByeToken = await runChallenge();
 ```
 
-#### 4. Send this token in any convenient way to the backend. For example in `Challenge-Token` header
+#### 4. Send this token in any convenient way to the backend. For example in `BotBye-Token` header:
 
 ```javascript
 fetch('https://domain.com', {
@@ -53,7 +53,7 @@ fetch('https://domain.com', {
 })
 ```
 
-#### 5. runChallenge
+### runChallenge()
 
 Package also exports `runChallenge` function.
 Before call it, make sure that `initChallenges` was called earlier.
@@ -62,7 +62,7 @@ Before call it, make sure that `initChallenges` was called earlier.
 import {initChallenges, runChallenge} from "botbye-client";
 
 initChallenges({
-    siteKey: 'MY_SITE_KEY'
+    clientKey: '00000000-0000-0000-0000-000000000000' // Use your client-key
 });
 
 ...
