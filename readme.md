@@ -1,5 +1,5 @@
 [BotBye](https://botbye.com)  
-[DOCS](https://docs.botbye.com)
+[DOCS](https://botbye.com/docs)
 
 ## Install
 

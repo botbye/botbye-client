@@ -106,9 +106,10 @@ const loadRunnerCode = async (url, clientKey) => {
     throw createError("error.runner.loading", e);
   }
 };
+const SS = {};
 const parseRunnerCode = runnerCode => {
   try {
-    return new Function("tsmp", "api", runnerCode);
+    return new Function("tsmp", "api", "ss", runnerCode);
   } catch (e) {
     throw createError("error.runner.parse", e);
   }
@@ -116,7 +117,7 @@ const parseRunnerCode = runnerCode => {
 const initRunner = async (runnerConstructor, timestamp, api) => {
   let runner;
   try {
-    runner = await awaitWithTimeout(runnerConstructor(timestamp, api), TIMEOUTS.init, "init.timeout");
+    runner = await awaitWithTimeout(runnerConstructor(timestamp, api, SS), TIMEOUTS.init, "init.timeout");
     runner.t = () => vmId;
     DISPOSE = runner.d;
     return runner;
