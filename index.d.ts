@@ -6,4 +6,5 @@ type TInitChallengesOptions = {
     disableTelemetry?: boolean;
 };
 declare const initChallenges: ({ api, clientKey, disableTelemetry }: TInitChallengesOptions) => Promise<TChallengesRunner>;
-export { initChallenges, runChallenge, };
+declare const setUserId: (id: string) => void;
+export { initChallenges, runChallenge, setUserId };
