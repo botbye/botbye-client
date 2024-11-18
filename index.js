@@ -81,7 +81,11 @@ const withRetryAndTimeout = async (promiseFactory, attempts, ms, timeoutMessage)
     try {
       const result = await awaitWithTimeout(promiseFactory(), ms, timeoutMessage);
       return result;
-    } catch (e) {}
+    } catch (e) {
+      if (attempt === attempts - 1) {
+        throw e;
+      }
+    }
   }
   throw new Error(timeoutMessage + ` (${attempts} attempts)`);
 };
@@ -129,16 +133,28 @@ async function loadRunnerCode(api, clientKey, vmId) {
         const message = await r.text();
         throw createError(message);
       }
-      const code = await r.text();
-      const timestamp = r.headers.get("X-Server-Timestamp");
-      return {
-        code,
-        timestamp
-      };
+      return r.text();
     });
     return await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout");
   } catch (e) {
     throw createError("error.runner.loading", e);
+  }
+}
+async function getTime(url) {
+  const random = Math.floor(Math.random() * 1000000);
+  try {
+    const promiseFactory = () => fetch(`${url}/time/v1/${random}`, {
+      method: "POST"
+    }).then(async r => {
+      if (!r.ok) {
+        const message = await r.text();
+        throw createError(message);
+      }
+      return r.json();
+    });
+    return await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "time.loading.timeout");
+  } catch (e) {
+    throw createError("error.time.loading", e);
   }
 }
 function parseRunnerCode(runnerCode) {
@@ -193,13 +209,12 @@ const factory = () => {
   const getRunner = async (api, clientKey) => {
     let runner;
     try {
-      const {
-        code,
-        timestamp
-      } = await loadRunnerCode(api, clientKey, vmId);
-      const normalizedTimestamp = timestamp ? Number.parseFloat(timestamp) * 1000 : Date.now();
+      const timestampPromise = getTime(api);
+      timestampPromise.catch(() => void 0);
+      const code = await loadRunnerCode(api, clientKey, vmId);
+      const timestamp = (await timestampPromise).time;
       const runnerConstructor = parseRunnerCode(code);
-      runner = await initRunner(runnerConstructor, normalizedTimestamp, api);
+      runner = await initRunner(runnerConstructor, timestamp, api);
     } catch (e) {
       if (e instanceof Error) {
         LOAD_FAILED = true;
