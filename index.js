@@ -1,6 +1,6 @@
 const packageName = "[ВоtВуе] ";
 const TIMEOUTS = {
-  loading: 10000,
+  loading: 4000,
   init: 5000,
   runtime: 5000
 };
@@ -76,10 +76,24 @@ const awaitWithTimeout = async (promise, ms, timeoutMessage) => {
   }
   return result;
 };
+const any = function (promises) {
+  return new Promise(function (resolve, reject) {
+    let counter = 0;
+    promises.forEach(promise => {
+      promise.then(resolve).catch(function (e) {
+        if (++counter === promises.length) {
+          reject(e);
+        }
+      });
+    });
+  });
+};
 const withRetryAndTimeout = async (promiseFactory, attempts, ms, timeoutMessage) => {
+  const requests = [];
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const result = await awaitWithTimeout(promiseFactory(), ms, timeoutMessage);
+      requests.push(promiseFactory());
+      const result = await awaitWithTimeout(any(requests), ms, timeoutMessage);
       return result;
     } catch (e) {
       if (attempt === attempts - 1) {
