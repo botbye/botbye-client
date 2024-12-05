@@ -7,9 +7,10 @@ const TIMEOUTS = {
 const RETRY_ATTEMPTS = {
   loading: 2
 };
+const voidFn = () => void 0;
 function defer() {
-  let resolve = null;
-  let reject = null;
+  let resolve = voidFn;
+  let reject = voidFn;
   const promise = new Promise((_resolve, _reject) => {
     resolve = _resolve;
     reject = _reject;
@@ -103,7 +104,7 @@ const withRetryAndTimeout = async (promiseFactory, attempts, ms, timeoutMessage)
   }
   throw new Error(timeoutMessage + ` (${attempts} attempts)`);
 };
-async function initRemoteStorage(api, clientKey, storage) {
+async function initRemoteStorage(api, clientKey, storage, cb) {
   try {
     const promiseFactory = () => fetch(`${api}/vstrg/v1/${clientKey}`).then(async r => {
       if (!r.ok) {
@@ -123,8 +124,9 @@ async function initRemoteStorage(api, clientKey, storage) {
         storage.set = result.set;
         storage.get = result.get;
         result.fill(storage.storage);
+        cb(0);
       }
-    }).catch(() => void 0);
+    }).catch(voidFn);
   } catch {}
 }
 async function initTelemetry(api, clientKey) {
@@ -185,6 +187,7 @@ const factory = () => {
   let RELOAD_TIME = 10000;
   let DISPOSE = null;
   let SET_USER_ID = null;
+  const storageDefer = defer();
   const storage = {
     storage: {},
     get: function (key) {
@@ -192,7 +195,8 @@ const factory = () => {
     },
     set: function (key, value) {
       this.storage[key] = value;
-    }
+    },
+    i: storageDefer.promise
   };
   const SS = {
     storage
@@ -203,7 +207,7 @@ const factory = () => {
   const tokenBuilder = payload => `visitorId=${userId}&sessionId=${sessionId}&token=${encodeURIComponent(payload)}`;
   const dispose = () => {
     if (DISPOSE) {
-      DISPOSE().catch(() => void 0);
+      DISPOSE().catch(voidFn);
       DISPOSE = null;
     }
     runnerPromise = null;
@@ -224,7 +228,7 @@ const factory = () => {
     let runner;
     try {
       const timestampPromise = getTime(api);
-      timestampPromise.catch(() => void 0);
+      timestampPromise.catch(voidFn);
       const code = await loadRunnerCode(api, clientKey, vmId);
       const timestamp = (await timestampPromise).time;
       const runnerConstructor = parseRunnerCode(code);
@@ -294,16 +298,16 @@ const factory = () => {
                             clientKey,
                             disableTelemetry = false
                           }) => {
-    initRemoteStorage(api, clientKey, storage).catch(() => void 0);
+    initRemoteStorage(api, clientKey, storage, storageDefer.resolve).catch(voidFn);
     if (!disableTelemetry) {
-      initTelemetry(api, clientKey).catch(() => void 0);
+      initTelemetry(api, clientKey).catch(voidFn);
     }
     return main(api, clientKey);
   };
   const setUserId = userId => {
-    if (SET_USER_ID) {
-      SET_USER_ID(userId).catch(() => void 0);
-    }
+    storageDefer.promise.then(() => {
+      SET_USER_ID && SET_USER_ID(userId).catch(voidFn);
+    }).catch(voidFn);
   };
   const runChallenge = async () => {
     if (!runnerPromise) {
