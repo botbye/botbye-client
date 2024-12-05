@@ -290,7 +290,7 @@ const factory = () => {
     return runChallenge;
   };
   const initChallenges = ({
-                            api = "https://api.botbye.com",
+                            api = "https://verify.botbye.com",
                             clientKey,
                             disableTelemetry = false
                           }) => {
