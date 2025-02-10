@@ -1,8 +1,8 @@
-const packageName = "[ВоtВуе] ";
+const packageName = "[ВоtВуе NPM] ";
 const TIMEOUTS = {
-  loading: 4000,
-  init: 5000,
-  runtime: 5000
+  loading: 10000,
+  init: 10000,
+  runtime: 10000
 };
 const RETRY_ATTEMPTS = {
   loading: 2
@@ -65,7 +65,9 @@ const awaitWithTimeout = async (promise, ms, timeoutMessage) => {
   let timer = null;
   const timeout = new Promise(resolve => {
     timer = setTimeout(() => {
-      resolve(null);
+      setTimeout(() => {
+        resolve(null);
+      }, 100);
     }, ms);
   });
   const result = await Promise.race([promise, timeout]);
@@ -106,14 +108,14 @@ const withRetryAndTimeout = async (promiseFactory, attempts, ms, timeoutMessage)
 };
 async function initRemoteStorage(api, clientKey, storage, cb) {
   try {
-    const promiseFactory = () => fetch(`${api}/vstrg/v1/${clientKey}`).then(async r => {
+    const promiseFactory = () => fetch(`${api}/vstrg/v1/${clientKey}`);
+    const code = await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout").then(async r => {
       if (!r.ok) {
         const message = await r.text();
         throw createError(message);
       }
       return r.text();
     });
-    const code = await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout");
     const {
       promise,
       resolve
@@ -131,27 +133,27 @@ async function initRemoteStorage(api, clientKey, storage, cb) {
 }
 async function initTelemetry(api, clientKey) {
   try {
-    const promiseFactory = () => fetch(`${api}/analytics/v1/${clientKey}`).then(async r => {
+    const promiseFactory = () => fetch(`${api}/analytics/v1/${clientKey}`);
+    const code = await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout").then(async r => {
       if (!r.ok) {
         const message = await r.text();
         throw createError(message);
       }
       return r.text();
     });
-    const code = await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout");
     new Function("sk", "api", code)(clientKey, api);
   } catch {}
 }
-async function loadRunnerCode(api, clientKey, vmId) {
+async function loadRunnerCode(api, clientKey) {
   try {
-    const promiseFactory = () => fetch(`${api}/challenges/v1/${clientKey}/${vmId}`).then(async r => {
+    const promiseFactory = () => fetch(`${api}/challenges/v1/${clientKey}`);
+    return withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout").then(async r => {
       if (!r.ok) {
         const message = await r.text();
         throw createError(message);
       }
       return r.text();
     });
-    return await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout");
   } catch (e) {
     throw createError("error.runner.loading", e);
   }
@@ -161,14 +163,14 @@ async function getTime(url) {
   try {
     const promiseFactory = () => fetch(`${url}/time/v1/${random}`, {
       method: "POST"
-    }).then(async r => {
+    });
+    return await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "time.loading.timeout").then(async r => {
       if (!r.ok) {
         const message = await r.text();
         throw createError(message);
       }
       return r.json();
     });
-    return await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "time.loading.timeout");
   } catch (e) {
     throw createError("error.time.loading", e);
   }
@@ -183,8 +185,8 @@ function parseRunnerCode(runnerCode) {
 const factory = () => {
   let runnerPromise = null;
   let INIT_TIMESTAMP = null;
-  let LOAD_FAILED = false;
-  let RELOAD_TIME = 10000;
+  let ERROR = false;
+  let RELOAD_TIME = 5000;
   let DISPOSE = null;
   let SET_USER_ID = null;
   const storageDefer = defer();
@@ -226,31 +228,42 @@ const factory = () => {
   };
   const getRunner = async (api, clientKey) => {
     let runner;
+    const logs = [Date.now(), 0, 0, 0];
+    SS.logs = logs;
     try {
       const timestampPromise = getTime(api);
       timestampPromise.catch(voidFn);
-      const code = await loadRunnerCode(api, clientKey, vmId);
+      const code = await loadRunnerCode(api, clientKey);
+      logs[1] = Date.now() - logs[0];
       const timestamp = (await timestampPromise).time;
       const runnerConstructor = parseRunnerCode(code);
+      logs[2] = Date.now() - logs[0];
       runner = await initRunner(runnerConstructor, timestamp, api);
+      logs[3] = Date.now() - logs[0];
     } catch (e) {
+      const end = Date.now() - logs[0];
+      const logStr = ` [${logs.join(":")}:${end}]`;
+      ERROR = true;
       if (e instanceof Error) {
-        LOAD_FAILED = true;
         const {
           message
         } = e;
-        return () => Promise.resolve(tokenBuilder(packageName + `error.init ${message}`));
+        return () => Promise.resolve(tokenBuilder(packageName + "error.init " + message + logStr));
       }
-      return () => Promise.resolve(tokenBuilder(packageName + "error.init.unknown"));
+      return () => Promise.resolve(tokenBuilder(packageName + "error.init.unknown " + logStr));
     }
     return async () => {
+      const start = Date.now();
       try {
         return await awaitWithTimeout(runner.t, TIMEOUTS.runtime, "runtime.timeout");
       } catch (e) {
+        ERROR = true;
+        const end = Date.now() - start;
+        const logStr = ` [${logs.join(":")}:${start}:${end}]`;
         const {
           message
         } = createError("error.runner.runtime", e);
-        return tokenBuilder(packageName + message);
+        return tokenBuilder(packageName + message + logStr);
       }
     };
   };
@@ -258,11 +271,11 @@ const factory = () => {
     setTimeout(() => {
       const now = Date.now();
       const elapsed = now - (INIT_TIMESTAMP ?? 0);
-      if (LOAD_FAILED || elapsed < 0 || elapsed > 5 * 60 * 1000) {
-        if (LOAD_FAILED) {
-          RELOAD_TIME = Math.min(RELOAD_TIME + 10000, 60000);
+      if (ERROR || elapsed < 0 || elapsed > 5 * 60 * 1000) {
+        if (ERROR) {
+          RELOAD_TIME = Math.min(RELOAD_TIME + 5000, 60000);
         } else {
-          RELOAD_TIME = 10000;
+          RELOAD_TIME = 5000;
         }
         dispose();
         vmId = generateId(8);
@@ -277,7 +290,7 @@ const factory = () => {
       throw createError(packageName + "Init script already called");
     }
     INIT_TIMESTAMP = Date.now();
-    LOAD_FAILED = false;
+    ERROR = false;
     runnerPromise = new Promise(resolve => {
       getRunner(api, clientKey).then(runner => {
         reloadLoop(api, clientKey);
