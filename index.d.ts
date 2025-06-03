@@ -1,8 +1,9 @@
-type TChallengesRunner = () => Promise<string>;
+type TGetTokenOptions = {};
+type TChallengesRunner = (options?: TGetTokenOptions) => Promise<string>;
 type TInitChallengesOptions = {
-    clientKey: string;
     api?: string;
-    disableTelemetry?: boolean;
+    clientKey: string;
+    withoutSessions?: boolean;
 };
-declare const setUserId: (userId: string) => void, initChallenges: ({ api, clientKey, disableTelemetry, }: TInitChallengesOptions) => Promise<TChallengesRunner>, runChallenge: TChallengesRunner;
+declare const setUserId: (userId: string) => void, initChallenges: ({ api, clientKey, withoutSessions, }: TInitChallengesOptions) => Promise<TChallengesRunner>, runChallenge: TChallengesRunner;
 export { initChallenges, runChallenge, setUserId, };

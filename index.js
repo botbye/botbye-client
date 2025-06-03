@@ -1,11 +1,12 @@
-const packageName = "[ВоtВуе NPM] ";
+const VERSION = "1.0.12";
+const packageName = `[ВоtВуе NPM ${VERSION}] `;
 const TIMEOUTS = {
   loading: 10000,
   init: 10000,
   runtime: 10000
 };
 const RETRY_ATTEMPTS = {
-  loading: 2
+  loading: 5
 };
 const voidFn = () => void 0;
 function defer() {
@@ -108,87 +109,99 @@ const withRetryAndTimeout = async (promiseFactory, attempts, ms, timeoutMessage)
 };
 async function initRemoteStorage(api, clientKey, storage, cb) {
   try {
-    const promiseFactory = () => fetch(`${api}/vstrg/v1/${clientKey}`);
-    const code = await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout").then(async r => {
-      if (!r.ok) {
-        const message = await r.text();
-        throw createError(message);
-      }
-      return r.text();
-    });
+    const promiseFactory = () => loadScript(`${api}/vstrg/v2/${clientKey}`);
+    const runner = await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout");
     const {
       promise,
       resolve
     } = defer();
-    new Function("api", "res", code)(api, resolve);
+    runner(api, resolve);
     promise.then(result => {
       if (typeof result === "object" && result != null && "get" in result && "set" in result && "fill" in result) {
         storage.set = result.set;
         storage.get = result.get;
         result.fill(storage.storage);
-        cb(0);
+        cb();
       }
     }).catch(voidFn);
   } catch {}
 }
-async function initTelemetry(api, clientKey) {
+async function initSessions(api, clientKey) {
   try {
-    const promiseFactory = () => fetch(`${api}/analytics/v1/${clientKey}`);
-    const code = await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout").then(async r => {
-      if (!r.ok) {
-        const message = await r.text();
-        throw createError(message);
-      }
-      return r.text();
-    });
-    new Function("sk", "api", code)(clientKey, api);
+    const promiseFactory = () => loadScript(`${api}/analytics/v2/${clientKey}`);
+    const runner = await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout");
+    runner(clientKey, api);
   } catch {}
 }
-async function loadRunnerCode(api, clientKey) {
-  try {
-    const promiseFactory = () => fetch(`${api}/challenges/v1/${clientKey}`);
-    return withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout").then(async r => {
-      if (!r.ok) {
-        const message = await r.text();
-        throw createError(message);
+const getId = () => String(Math.random()).replace("0.", "");
+function loadScript(src) {
+  const id = getId();
+  const key = "__prt__" + id;
+  window[key] = {};
+  const script = document.createElement("script");
+  script.src = src;
+  script.dataset.id = id;
+  script.async = true;
+  document.body.append(script);
+  const finalize = () => {
+    script.remove();
+    delete window[key];
+  };
+  return new Promise((resolve, reject) => {
+    script.onload = () => {
+      if (!window[key].r || typeof window[key].r !== "function") {
+        reject(new Error("Not valid script loaded"));
+        finalize();
+        return;
       }
-      return r.text();
-    });
-  } catch (e) {
-    throw createError("error.runner.loading", e);
-  }
+      resolve(window[key].r);
+      finalize();
+    };
+    script.onerror = () => {
+      finalize();
+      reject(new Error("Script load error"));
+    };
+  });
 }
-async function getTime(url) {
+function loadRunnerCode(api, clientKey) {
+  const promiseFactory = () => loadScript(`${api}/challenges/v2/${clientKey}`);
+  return withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "loading.timeout").catch(e => {
+    throw createError("error.runner.loading", e);
+  });
+}
+async function getTime(api) {
   const random = Math.floor(Math.random() * 1000000);
   try {
-    const promiseFactory = () => fetch(`${url}/time/v1/${random}`, {
-      method: "POST"
-    });
-    return await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "time.loading.timeout").then(async r => {
-      if (!r.ok) {
-        const message = await r.text();
-        throw createError(message);
-      }
-      return r.json();
-    });
+    const promiseFactory = () => {
+      const start = Date.now();
+      return fetch(`${api}/time/v1/${random}`, {
+        method: "POST"
+      }).then(response => [response, start]);
+    };
+    const result = await withRetryAndTimeout(promiseFactory, RETRY_ATTEMPTS.loading, TIMEOUTS.loading, "time.loading.timeout");
+    const [response, start] = result;
+    if (!response.ok) {
+      const message = await response.text();
+      throw createError(message);
+    }
+    return response.json().then(({
+                                   time
+                                 }) => ({
+      time,
+      start
+    }));
   } catch (e) {
     throw createError("error.time.loading", e);
-  }
-}
-function parseRunnerCode(runnerCode) {
-  try {
-    return new Function("tsmp", "api", "ss", runnerCode);
-  } catch (e) {
-    throw createError("error.runner.parse", e);
   }
 }
 const factory = () => {
   let runnerPromise = null;
   let INIT_TIMESTAMP = null;
   let ERROR = false;
-  let RELOAD_TIME = 5000;
+  let RELOAD_TIME = 2000;
   let DISPOSE = null;
   let SET_USER_ID = null;
+  let successRunnerPromiseDefer = null;
   const storageDefer = defer();
   const storage = {
     storage: {},
@@ -205,67 +218,56 @@ const factory = () => {
   };
   const userId = generateUserId();
   const sessionId = generateSessionId();
-  let vmId = generateId(8);
   const tokenBuilder = payload => `visitorId=${userId}&sessionId=${sessionId}&token=${encodeURIComponent(payload)}`;
+  const getRunner = async (api, clientKey) => {
+    let runner;
+    const logs = [Date.now(), 0, 0, 0, 0];
+    try {
+      const timeResult = getTime(api).then(r => {
+        logs[1] = Date.now();
+        return r;
+      });
+      timeResult.catch(() => void 0);
+      const runnerConstructor = await loadRunnerCode(api, clientKey);
+      logs[2] = Date.now();
+      const serverTime = await timeResult;
+      runner = await initRunner(runnerConstructor, serverTime.time, api, serverTime.time - serverTime.start);
+      logs[3] = Date.now();
+      return [runner, logs];
+    } catch (e) {
+      logs[4] = Date.now();
+      const logStr = ` [${logs.join(":")}]`;
+      if (e instanceof Error) {
+        const {
+          message
+        } = e;
+        throw createError("error.init " + message + logStr);
+      }
+      throw createError("error.init.unknown " + logStr);
+    }
+  };
+  const initRunner = async (runnerConstructor, tsmp, api, dif) => {
+    try {
+      const runner = await awaitWithTimeout(runnerConstructor({
+        tsmp,
+        api,
+        ss: SS,
+        dif,
+        v: "n." + VERSION
+      }), TIMEOUTS.init, "init.timeout");
+      const vmId = generateId(8);
+      runner.t = () => vmId;
+      return runner;
+    } catch (e) {
+      throw createError("error.runner.init", e);
+    }
+  };
   const dispose = () => {
     if (DISPOSE) {
       DISPOSE().catch(voidFn);
       DISPOSE = null;
     }
     runnerPromise = null;
-  };
-  const initRunner = async (runnerConstructor, timestamp, api) => {
-    let runner;
-    try {
-      runner = await awaitWithTimeout(runnerConstructor(timestamp, api, SS), TIMEOUTS.init, "init.timeout");
-      runner.t = () => vmId;
-      DISPOSE = runner.d;
-      SET_USER_ID = runner.sui;
-      return runner;
-    } catch (e) {
-      throw createError("error.runner.init", e);
-    }
-  };
-  const getRunner = async (api, clientKey) => {
-    let runner;
-    const logs = [Date.now(), 0, 0, 0];
-    SS.logs = logs;
-    try {
-      const timestampPromise = getTime(api);
-      timestampPromise.catch(voidFn);
-      const code = await loadRunnerCode(api, clientKey);
-      logs[1] = Date.now() - logs[0];
-      const timestamp = (await timestampPromise).time;
-      const runnerConstructor = parseRunnerCode(code);
-      logs[2] = Date.now() - logs[0];
-      runner = await initRunner(runnerConstructor, timestamp, api);
-      logs[3] = Date.now() - logs[0];
-    } catch (e) {
-      const end = Date.now() - logs[0];
-      const logStr = ` [${logs.join(":")}:${end}]`;
-      ERROR = true;
-      if (e instanceof Error) {
-        const {
-          message
-        } = e;
-        return () => Promise.resolve(tokenBuilder(packageName + "error.init " + message + logStr));
-      }
-      return () => Promise.resolve(tokenBuilder(packageName + "error.init.unknown " + logStr));
-    }
-    return async () => {
-      const start = Date.now();
-      try {
-        return await awaitWithTimeout(runner.t, TIMEOUTS.runtime, "runtime.timeout");
-      } catch (e) {
-        ERROR = true;
-        const end = Date.now() - start;
-        const logStr = ` [${logs.join(":")}:${start}:${end}]`;
-        const {
-          message
-        } = createError("error.runner.runtime", e);
-        return tokenBuilder(packageName + message + logStr);
-      }
-    };
   };
   const reloadLoop = (api, clientKey) => {
     setTimeout(() => {
@@ -277,8 +279,6 @@ const factory = () => {
         } else {
           RELOAD_TIME = 5000;
         }
-        dispose();
-        vmId = generateId(8);
         void main(api, clientKey);
       } else {
         reloadLoop(api, clientKey);
@@ -286,16 +286,32 @@ const factory = () => {
     }, RELOAD_TIME);
   };
   const main = async (api, clientKey) => {
-    if (runnerPromise) {
-      throw createError(packageName + "Init script already called");
-    }
     INIT_TIMESTAMP = Date.now();
     ERROR = false;
-    runnerPromise = new Promise(resolve => {
-      getRunner(api, clientKey).then(runner => {
+    const newSuccessRunnerPromiseDefer = defer();
+    successRunnerPromiseDefer && successRunnerPromiseDefer.resolve(newSuccessRunnerPromiseDefer.promise);
+    successRunnerPromiseDefer = newSuccessRunnerPromiseDefer;
+    const newRunnerPromise = new Promise(resolve => {
+      getRunner(api, clientKey).then(([runner, logs]) => {
         reloadLoop(api, clientKey);
-        resolve(runner);
+        const challengesRunner = async options => {
+          try {
+            return await awaitWithTimeout(runner.tv1(options), TIMEOUTS.runtime, "runtime.timeout");
+          } catch (e) {
+            const {
+              message
+            } = createError("error.runner.runtime", e);
+            return tokenBuilder(packageName + message);
+          }
+        };
+        resolve(challengesRunner);
+        SS.logs = logs;
+        dispose();
+        DISPOSE = runner.d;
+        SET_USER_ID = runner.sui;
+        successRunnerPromiseDefer && successRunnerPromiseDefer.resolve(0);
       }).catch(e => {
+        ERROR = true;
         const {
           message
         } = createError("error.main", e);
@@ -303,31 +319,41 @@ const factory = () => {
         resolve(() => Promise.resolve(tokenBuilder(packageName + message)));
       });
     });
-    await runnerPromise;
+    if (runnerPromise === null) {
+      runnerPromise = newRunnerPromise;
+    }
+    await newRunnerPromise;
+    if (!ERROR) {
+      runnerPromise = newRunnerPromise;
+    }
     return runChallenge;
   };
   const initChallenges = ({
                             api = "https://verify.botbye.com",
                             clientKey,
-                            disableTelemetry = false
+                            withoutSessions = false
                           }) => {
+    successRunnerPromiseDefer = defer();
     initRemoteStorage(api, clientKey, storage, storageDefer.resolve).catch(voidFn);
-    if (!disableTelemetry) {
-      initTelemetry(api, clientKey).catch(voidFn);
+    if (!withoutSessions) {
+      initSessions(api, clientKey).catch(voidFn);
     }
     return main(api, clientKey);
   };
   const setUserId = userId => {
-    storageDefer.promise.then(() => {
-      SET_USER_ID && SET_USER_ID(userId).catch(voidFn);
-    }).catch(voidFn);
+    const successRunnerPromise = successRunnerPromiseDefer && successRunnerPromiseDefer.promise;
+    if (successRunnerPromise) {
+      storageDefer.promise.then(() => successRunnerPromise).then(() => {
+        SET_USER_ID && SET_USER_ID(userId).catch(voidFn);
+      }).catch(voidFn);
+    }
   };
-  const runChallenge = async () => {
+  const runChallenge = async options => {
     if (!runnerPromise) {
       throw createError(packageName + "Init script should be called first");
     }
     const runner = await runnerPromise;
-    return runner();
+    return runner(options);
   };
   return {
     setUserId,
