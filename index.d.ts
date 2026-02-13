@@ -7,6 +7,16 @@ type TInitChallengesOptions = {
     withoutReload?: boolean;
     withoutRemoteStorage?: boolean;
 };
-declare const setUserId: (userId: string) => void, initChallenges: ({ api, clientKey, withoutSessions }: TInitChallengesOptions) => PromiseLike<TChallengesRunner>, runChallenge: TChallengesRunner;
-export { initChallenges, runChallenge, setUserId };
+type TSetUserId = (userId: string) => void;
+type TInitChallenges = ({ api, clientKey, withoutSessions }: TInitChallengesOptions) => PromiseLike<TChallengesRunner>
+type TFactoryResponse = {
+    setUserId: TSetUserId
+    initChallenges: TInitChallenges,
+    runChallenge: TChallengesRunner;
+}
+declare const setUserId: TSetUserId,
+    initChallenges: TInitChallenges,
+    runChallenge: TChallengesRunner,
+    factory: (api?: string) => TFactoryResponse;
+export { initChallenges, runChallenge, setUserId, factory };
 export type { TInitChallengesOptions, TGetTokenOptions, TChallengesRunner }
