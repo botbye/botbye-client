@@ -1,7 +1,30 @@
 {
-  "name": "botbye-client",
-  "version": "1.2.1",
+  "name": "@botbye/client",
+  "version": "2.0.0",
+  "description": "BotBye! browser client library",
   "packageManager": "yarn@3.4.1",
-  "private": false,
-  "url": "https://botbye.com"
+  "types": "src/index.d.ts",
+  "module": "src/index.esm.js",
+  "main": "src/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.esm.js",
+      "require": "./src/index.js"
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://botbye.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/botbye/botbye-client"
+  }
 }
