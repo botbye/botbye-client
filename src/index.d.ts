@@ -11,7 +11,6 @@ type TPhishingCatcherGetterOptions = {
     id?: string;
     type?: "PNG" | "OBJECT";
     skipExecution?: boolean;
-    innerUrl?: string;
 };
 type TPhishingCatcherGetter = (options?: TPhishingCatcherGetterOptions) => HTMLElement;
 type TPhishingApi = {
